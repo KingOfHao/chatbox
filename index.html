@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-16">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" type="image/png" href="media/whatcat.png">
+<title>Meo Meo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --chat-width: 720px; }
+  @font-face {
+    font-family: 'LeagueScript';
+    src: url('fonts/LeagueScript.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Pecita';
+    size-adjust: 150%;
+    src: url('fonts/Pecita.woff2') format('woff2');
+  }
+  html, body { height: 100%; background: #000; color: #e1e6e3;
+    font-family: 'Pecita', sans-serif;
+    color-scheme: dark;
+    scrollbar-width: thin;
+    scrollbar-color: #333 transparent;
+  }
+
+  #chat {
+    position: fixed; inset: 0; display: flex; flex-direction: column; background: #000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease-in-out;
+    height: 100dvh;
+  }
+  #chat.show { opacity: 1; pointer-events: auto; }
+  #messages {
+    flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px;
+    padding-inline: max(16px, calc((100% - var(--chat-width)) / 2)); overscroll-behavior: contain;
+  }
+  .msg { max-width: min(85%, 520px); padding: 8px 12px; border-radius: 12px;
+    background: #1c1c1e; align-self: flex-start; word-wrap: break-word; white-space: pre-wrap;
+  }
+  .msg.me { align-self: flex-end; background: #2a2a2e; }
+  .time { display: block; margin-top: 4px; font-size: 11px; color: #777; }
+  .empty { margin: auto; color: #666; }
+
+  #bar { 
+    display: flex; padding-top: 12px; flex-direction: column;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    padding-inline: max(32px, calc((100% - var(--chat-width)) / 2)); border-top: 1px solid #222;
+  }
+  #border {
+    flex: none; min-width: 0; display: flex; align-items: flex-end; align-items: center; gap: 0px; padding: 0; background: #111;
+    overflow: hidden;
+    border: 2px solid #333; border-radius: 24px;
+  }
+  #border:focus-within { outline: 2px solid #e1e6e3;}
+  #input {
+    flex: 1; min-width: 0; background: transparent; color: #e1e6e3; border: 0;
+    min-height: 42px; padding: 10px 12px; font: inherit; font-size: 16px; outline: none;
+    resize: none; overflow-y: auto; max-height: 50dvh;
+  }
+  #send {
+    background: #e1e6e3; color: #000; border: 0; border-radius: 1000px; padding: 10px 18px;
+    flex-shrink: 0; white-space: nowrap;
+    align-self: flex-end;
+    font: inherit; font-weight: 600; cursor: pointer;
+  }
+  #intro{
+    display: flex;
+    text-align: center; justify-content: center; align-items: center;
+    font-family: 'LeagueScript', sans-serif; color: #e1e6e3; font-size: 80px;
+    transition: 0.4s ease-in-out;
+    opacity: 0;
+    height: 100vh; height: 100dvh;
+  }
+  #intro.show { opacity: 1; }
+  #attach {
+    flex-shrink: 0; width: 46px; height: 46px;
+    align-self: flex-end;
+    display: grid; place-items: center;
+    background: none; border: 0; border-radius: 1000px;
+    color: #888; cursor: pointer;
+    background: #1c1c1e;
+  }
+  #attach:hover { color: #e1e6e3; }
+  #attach:focus-visible, #send:focus-visible {
+    outline: 2px solid #e1e6e3; outline-offset: -4px;
+  }
+
+  #preview {
+    position: relative; align-self: flex-start; }
+  #previewImg { display: block; max-height: 120px; max-width: 100%; border-radius: 12px; border: 2px solid #333; }
+  #removeImg {
+    position: absolute; top: -8px; right: -8px; width: 24px; height: 24px;
+    border: 0; border-radius: 50%; background: #e1e6e3; color: #000;
+    font-size: 12px; cursor: pointer;
+  }
+
+  .msg a { display: block; }
+  .msg img { display: block; max-width: 100%; height: auto; border-radius: 8px; background: #111; }
+  .msg img + .text, .msg a + .text { margin-top: 6px; }
+</style>
+</head>
+<body>
+<p id="intro">Hello ellie</p>
+<div id="chat">
+  <div id="messages"></div>
+  <div id="bar">
+    <div id="preview" hidden>
+      <img id="previewImg" alt="Ảnh sẽ gửi">
+      <button id="removeImg" type="button" aria-label="Bỏ ảnh">✕</button>
+    </div>
+    <div id="border">
+      <button id="attach" type="button" aria-label="Đính kèm ảnh">
+        <img src="media/image.png" alt="Đính kèm ảnh" width="22" height="22">
+      </button>
+      <input id="file" type="file" accept="image/*" hidden>
+      <textarea id="input" rows="1" placeholder="Nhập tin nhắn..." maxlength="500" autocomplete="off"></textarea>
+      <button id="send">Gửi</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API = "/api/messages";
+  const $messages = document.getElementById("messages");
+  const $input = document.getElementById("input");
+  const $send = document.getElementById("send");
+  const $intro = document.getElementById("intro");
+  const $chat = document.getElementById("chat");
+  const isTouch = matchMedia("(pointer: coarse)").matches;
+
+  setTimeout(() => $intro.classList.add("show"), 500);
+  setTimeout(() => $intro.classList.remove("show"), 2500);
+  setTimeout(() => $chat.classList.add("show"), 3000);
+
+  const $attach = document.getElementById("attach");
+  const $file = document.getElementById("file");
+  const $preview = document.getElementById("preview");
+  const $previewImg = document.getElementById("previewImg");
+  const $removeImg = document.getElementById("removeImg");
+  let pending = null; // { dataUrl, w, h }
+  // ID ngẫu nhiên lưu trên trình duyệt (không cần đăng nhập) để biết tin nào là của bạn
+  let me = localStorage.getItem("chat_id");
+  if (!me) {
+    me = Math.random().toString(36).slice(2, 10);
+    localStorage.setItem("chat_id", me);
+  }
+
+  let lastSnapshot = "";
+  function autoGrow() {
+    $input.style.height = "auto";
+    $input.style.height = $input.scrollHeight + "px";
+  }
+
+  function showPreview() {
+    if (!pending) { $preview.hidden = true; $previewImg.removeAttribute("src"); return; }
+    $previewImg.src = pending.dataUrl;
+    $preview.hidden = false;
+  }
+
+  // Thu nhỏ + nén về JPEG; nếu vẫn lớn thì giảm kích thước thêm
+  async function compress(file, maxSide = 1280, maxChars = 600000) {
+    const bmp = await createImageBitmap(file);
+    let side = maxSide;
+    while (side >= 200) {
+      const scale = Math.min(1, side / Math.max(bmp.width, bmp.height));
+      const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); // PNG trong suốt → nền trắng
+      ctx.drawImage(bmp, 0, 0, w, h);
+      for (let q = 0.85; q >= 0.4; q -= 0.15) {
+        const url = c.toDataURL("image/jpeg", q);
+        if (url.length <= maxChars) return { dataUrl: url, w, h };
+      }
+      side = Math.round(side * 0.75);
+    }
+    throw new Error("Ảnh quá lớn");
+  }
+
+  async function setImage(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    $send.disabled = true;
+    try { pending = await compress(file); showPreview(); }
+    catch { alert("Không đọc được ảnh này."); }
+    finally { $send.disabled = false; }
+  }
+
+  $attach.addEventListener("click", () => $file.click());
+  $file.addEventListener("change", () => { const f = $file.files[0]; $file.value = ""; setImage(f); });
+  $removeImg.addEventListener("click", () => { pending = null; showPreview(); });
+
+  // Dán ảnh từ clipboard (Ctrl+V)
+  $input.addEventListener("paste", (e) => {
+    const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith("image/"));
+    if (f) { e.preventDefault(); setImage(f); }
+  });
+
+  async function send() {
+    if ($send.disabled) return;                  // đang nén ảnh hoặc đang gửi
+    const text = $input.value.trim();
+    if (!text && !pending) return;
+
+    const image = pending;
+    $input.value = ""; autoGrow();
+    pending = null; showPreview();
+    $send.disabled = true;
+    try {
+      const r = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, sender: me, image: image?.dataUrl, w: image?.w, h: image?.h }),
+      });
+      if (!r.ok) throw new Error();
+      await load();
+      $messages.scrollTop = $messages.scrollHeight;
+    } catch {
+      // Gửi lỗi thì trả lại nội dung để không mất
+      $input.value = text; autoGrow();
+      pending = image; showPreview();
+      alert("Gửi không thành công, thử lại nhé.");
+    } finally {
+      $send.disabled = false;
+      $input.focus();
+    }
+  }
+
+  
+
+  function render(list) {
+    const snapshot = JSON.stringify(list);
+    if (snapshot === lastSnapshot) return; // không có gì mới thì không vẽ lại
+    lastSnapshot = snapshot;
+
+    const nearBottom = $messages.scrollHeight - $messages.scrollTop - $messages.clientHeight < 80;
+    $messages.textContent = "";
+
+    if (!list.length) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "Chưa có tin nhắn nào.";
+      $messages.appendChild(e);
+      return;
+    }
+
+    for (const m of list) {
+      const div = document.createElement("div");
+      div.className = "msg" + (m.sender === me ? " me" : "");
+      if (m.img) {
+        const a = document.createElement("a");
+        a.href = "/api/image?id=" + encodeURIComponent(m.img);
+        a.target = "_blank"; a.rel = "noopener";
+        const img = document.createElement("img");
+        img.src = a.href; img.alt = "Ảnh"; img.loading = "lazy";
+        if (m.w && m.h) { img.width = m.w; img.height = m.h; } // giữ chỗ trước để không bị nhảy layout
+        a.appendChild(img);
+        div.appendChild(a);
+      }
+      if (m.text) {
+        const t = document.createElement("div");
+        t.className = "text";
+        t.textContent = m.text;
+        div.appendChild(t);
+      }
+      const t = document.createElement("span");
+      t.className = "time";
+      t.textContent = new Date(m.time).toLocaleString("vi-VN", {
+        hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
+      div.appendChild(t);
+      $messages.appendChild(div);
+    }
+    if (nearBottom || list.length === 1) $messages.scrollTop = $messages.scrollHeight;
+  }
+
+  async function load() {
+    try {
+      const r = await fetch(API, { cache: "no-store" });
+      if (r.ok) render(await r.json());
+    } catch (e) { /* mất mạng: bỏ qua, lần sau thử lại */ }
+  }
+
+  $send.addEventListener("click", send);
+  $input.addEventListener("input", autoGrow);
+  $input.addEventListener("keydown", (e) => {
+    if (e.isComposing) return;
+    if (e.key === "Enter" && !e.shiftKey && !isTouch) {
+      e.preventDefault();
+      send();
+    }
+  });
+
+  load();
+  setInterval(load, 1000); // cập nhật tin nhắn mới mỗi 1 giây
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+</script>
+</body>
+</html>
